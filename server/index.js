@@ -8,15 +8,18 @@ const server = http.createServer(app);
 
 const PORT = process.env.PORT || 4000;
 
-const allowedOrigins = (
-  process.env.CLIENT_ORIGIN || "http://localhost:3000"
-).split(",").map(origin => origin.trim());
+// Allow local development and the deployed Vercel website.
+const allowedOrigins = [
+  "http://localhost:3000",
+  "https://shadow-files-taupe.vercel.app",
+];
 
 const io = new Server(server, {
   cors: {
     origin: allowedOrigins,
-    methods: ["GET", "POST"]
-  }
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
 });
 
 const rooms = new Map();
@@ -175,7 +178,6 @@ function finishMission(room, winner, reason) {
   room.status = "completed";
 
   clearInterval(room.timer);
-
   clearAllLocations(room);
 
   io.to(room.code).emit("mission:finished", {
@@ -753,5 +755,5 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log("--------------------------------");
   console.log(" SHADOW FILES OUTDOOR ENGINE 3.0");
   console.log("--------------------------------");
-  console.log(`Server: http://localhost:${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
