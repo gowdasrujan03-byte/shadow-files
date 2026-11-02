@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -29,7 +28,6 @@ const MissionMap = dynamic(() => import("./mission-map"), {
   )
 });
 
-// LIVE RENDER BACKEND URL
 const SERVER_URL =
   process.env.NEXT_PUBLIC_GAME_SERVER_URL ||
   "https://shadow-files-backend-blfd.onrender.com";
@@ -109,9 +107,17 @@ export default function MultiplayerPage() {
   const [gpsStatus, setGpsStatus] = useState("GPS NOT SHARED");
 
   const lastLocationSentAt = useRef(0);
+  const autoLaunchHandled = useRef(false);
 
+  // CONNECT TO LIVE SERVER
   useEffect(() => {
-    const connection = io(SERVER_URL);
+    const connection = io(SERVER_URL, {
+      transports: ["websocket", "polling"],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 2000,
+      timeout: 20000
+    });
 
     setSocket(connection);
 
@@ -124,38 +130,37 @@ export default function MultiplayerPage() {
       setConnected(false);
     });
 
-    connection.on("connect_error", () => {
+    connection.on("connect_error", (err) => {
       setConnected(false);
-      setError("Cannot connect to the game server. Please try again.");
+      setError(
+        `Cannot connect to game server: ${err.message}. Please try again.`
+      );
     });
 
     connection.on("room:update", (data: Room) => {
       setRoom(data);
     });
 
-    connection.on(
-      "mission:role",
-      (data: { role: string; objective: string }) => {
-        setRole(data.role);
-        setObjective(data.objective);
-      }
-    );
+    connection.on("mission:role", (data: {
+      role: string;
+      objective: string;
+    }) => {
+      setRole(data.role);
+      setObjective(data.objective);
+    });
 
-    connection.on(
-      "checkpoint:clue",
-      (data: { checkpointId: string; clue: string }) => {
-        setClues(old => [
-          ...old,
-          `${data.checkpointId}: ${data.clue}`
-        ]);
-      }
-    );
+    connection.on("checkpoint:clue", (data: {
+      checkpointId: string;
+      clue: string;
+    }) => {
+      setClues(old => [
+        ...old,
+        `${data.checkpointId}: ${data.clue}`
+      ]);
+    });
 
     connection.on("players:locations", (data: any) => {
-      // The server sends a role-filtered list to this socket only.
-      const incoming = Array.isArray(data?.players)
-        ? data.players
-        : [];
+      const incoming = Array.isArray(data?.players) ? data.players : [];
 
       const safeLocations: LivePlayerLocation[] = incoming.flatMap(
         (item: any) => {
@@ -193,7 +198,85 @@ export default function MultiplayerPage() {
     };
   }, []);
 
-  // Location sharing starts only after explicit player consent.
+  // AUTO CREATE OR JOIN FROM HOMEPAGE
+  useEffect(() => {
+    if (!connected || !socket || autoLaunchHandled.current) return;
+
+    const params = new URLSearchParams(window.location.search);
+
+    const action = params.get("action");
+    if (action !== "create" && action !== "join") return;
+
+    const incomingName = (params.get("name") || "").trim().slice(0, 18);
+    const incomingMode = params.get("mode") || modes[0];
+    const incomingCode = (params.get("code") || "").trim().toUpperCase();
+
+    if (!incomingName) {
+      setError("Please return to the homepage and enter your player name.");
+      return;
+    }
+
+    if (action === "join" && !incomingCode) {
+      setError("Room code is missing. Return to the homepage and enter it.");
+      return;
+    }
+
+    autoLaunchHandled.current = true;
+
+    setName(incomingName);
+    setMode(modes.includes(incomingMode) ? incomingMode : modes[0]);
+    setCode(incomingCode);
+
+    setError(
+      action === "create"
+        ? "Creating your live room..."
+        : "Joining the live room..."
+    );
+
+    const eventName = action === "create" ? "room:create" : "room:join";
+
+    const payload = action === "create"
+      ? {
+          name: incomingName,
+          mode: modes.includes(incomingMode) ? incomingMode : modes[0]
+        }
+      : {
+          name: incomingName,
+          code: incomingCode
+        };
+
+    socket.emit(eventName, payload, (response: any) => {
+      if (!response?.ok) {
+        setError(
+          response?.error ||
+          "The game server could not complete this request."
+        );
+        autoLaunchHandled.current = false;
+        return;
+      }
+
+      setRoom(response.room);
+
+      if (action === "create") {
+        setCode(response.room.code);
+      }
+
+      setRole("");
+      setShareLocation(false);
+      setMyPosition(null);
+      setLivePlayers([]);
+      setClues([]);
+      setFinished(null);
+      setDraftPoints([]);
+      setError("");
+
+      window.history.replaceState({}, "", "/multiplayer");
+    });
+  }, [connected, socket]);
+
+  const isHost = !!room && room.hostId === socket?.id;
+
+  // LIVE GPS SHARING
   useEffect(() => {
     if (
       !socket ||
@@ -205,7 +288,6 @@ export default function MultiplayerPage() {
         setMyPosition(null);
         setLivePlayers([]);
       }
-
       return;
     }
 
@@ -219,7 +301,7 @@ export default function MultiplayerPage() {
     setGpsStatus("REQUESTING GPS...");
 
     const watchId = navigator.geolocation.watchPosition(
-      (location) => {
+      location => {
         const nextPosition = {
           lat: location.coords.latitude,
           lng: location.coords.longitude
@@ -259,16 +341,10 @@ export default function MultiplayerPage() {
     };
   }, [socket, room?.code, room?.status, shareLocation]);
 
-  const isHost = !!room && room.hostId === socket?.id;
-
+  // CREATE ROOM
   function createRoom() {
     if (!socket || !name.trim()) {
       setError("Enter your player name.");
-      return;
-    }
-
-    if (!connected) {
-      setError("Game server is not connected. Please wait.");
       return;
     }
 
@@ -281,8 +357,8 @@ export default function MultiplayerPage() {
         mode
       },
       (response: any) => {
-        if (!response.ok) {
-          setError(response.error);
+        if (!response?.ok) {
+          setError(response?.error || "Could not create the room.");
           return;
         }
 
@@ -299,14 +375,10 @@ export default function MultiplayerPage() {
     );
   }
 
+  // JOIN ROOM
   function joinRoom() {
     if (!socket || !name.trim() || !code.trim()) {
       setError("Enter your name and room code.");
-      return;
-    }
-
-    if (!connected) {
-      setError("Game server is not connected. Please wait.");
       return;
     }
 
@@ -319,8 +391,8 @@ export default function MultiplayerPage() {
         code: code.trim().toUpperCase()
       },
       (response: any) => {
-        if (!response.ok) {
-          setError(response.error);
+        if (!response?.ok) {
+          setError(response?.error || "Could not join the room.");
           return;
         }
 
@@ -335,6 +407,7 @@ export default function MultiplayerPage() {
     );
   }
 
+  // COPY ROOM CODE
   async function copyCode() {
     if (!room) return;
 
@@ -346,12 +419,11 @@ export default function MultiplayerPage() {
     }
   }
 
+  // GET GPS POSITION
   function getPosition(): Promise<Position> {
     return new Promise((resolve, reject) => {
       if (!navigator.geolocation) {
-        reject(
-          new Error("GPS is not supported by this browser.")
-        );
+        reject(new Error("GPS is not supported by this browser."));
         return;
       }
 
@@ -378,6 +450,7 @@ export default function MultiplayerPage() {
     });
   }
 
+  // ADD CHECKPOINT
   async function addCheckpoint() {
     if (!room || !socket || !checkpointName.trim()) {
       setError("Enter a checkpoint name.");
@@ -405,7 +478,10 @@ export default function MultiplayerPage() {
           "A new clue has been discovered."
       };
 
-      const updatedPoints = [...draftPoints, newPoint];
+      const updatedPoints = [
+        ...draftPoints,
+        newPoint
+      ];
 
       socket.emit(
         "mission:set-checkpoints",
@@ -416,8 +492,8 @@ export default function MultiplayerPage() {
         (response: any) => {
           setBusy(false);
 
-          if (!response.ok) {
-            setError(response.error);
+          if (!response?.ok) {
+            setError(response?.error || "Could not save checkpoint.");
             return;
           }
 
@@ -433,6 +509,7 @@ export default function MultiplayerPage() {
     }
   }
 
+  // START MISSION
   function startMission() {
     if (!socket || !room) return;
 
@@ -454,13 +531,14 @@ export default function MultiplayerPage() {
       "mission:start",
       { code: room.code },
       (response: any) => {
-        if (!response.ok) {
-          setError(response.error);
+        if (!response?.ok) {
+          setError(response?.error || "Could not start mission.");
         }
       }
     );
   }
 
+  // CHECK IN AT CHECKPOINT
   async function checkIn(checkpointId: string) {
     if (!socket || !room) return;
 
@@ -481,8 +559,8 @@ export default function MultiplayerPage() {
         (response: any) => {
           setBusy(false);
 
-          if (!response.ok) {
-            setError(response.error);
+          if (!response?.ok) {
+            setError(response?.error || "Checkpoint check-in failed.");
             return;
           }
 
@@ -497,6 +575,7 @@ export default function MultiplayerPage() {
     }
   }
 
+  // ACCUSE PLAYER
   function accusePlayer() {
     if (!socket || !room || !accuseId) {
       setError("Select a player to accuse.");
@@ -510,8 +589,8 @@ export default function MultiplayerPage() {
         targetId: accuseId
       },
       (response: any) => {
-        if (!response.ok) {
-          setError(response.error);
+        if (!response?.ok) {
+          setError(response?.error || "Accusation failed.");
           return;
         }
 
@@ -524,9 +603,35 @@ export default function MultiplayerPage() {
     );
   }
 
+  // LOCATION SHARING CONTROL
+  function toggleLocationSharing() {
+    setError("");
+
+    if (shareLocation && socket && room) {
+      socket.emit(
+        "player:location:stop",
+        { code: room.code },
+        (response: any) => {
+          if (!response?.ok) {
+            setError(
+              response?.error ||
+              "Could not confirm location cleanup from the server."
+            );
+          }
+        }
+      );
+
+      setGpsStatus("GPS NOT SHARED");
+      setMyPosition(null);
+      setLivePlayers([]);
+      lastLocationSentAt.current = 0;
+    }
+
+    setShareLocation(value => !value);
+  }
+
   return (
     <main className="mp-page">
-
       <header className="mp-nav">
         <Link href="/" className="mp-brand">
           SHADOW <span>FILES</span>
@@ -539,10 +644,9 @@ export default function MultiplayerPage() {
       </header>
 
       <section className="mp-wrap">
-
         <div className="mp-kicker">
           <span className="mp-dot" />
-          OUTDOOR GAMEPLAY ENGINE / 2.0
+          OUTDOOR GAMEPLAY ENGINE / 3.0
         </div>
 
         <h1>
@@ -557,9 +661,7 @@ export default function MultiplayerPage() {
         </div>
 
         {!room ? (
-
           <div className="mp-columns">
-
             <section className="mp-panel">
               <Crown className="mp-icon" />
 
@@ -623,13 +725,9 @@ export default function MultiplayerPage() {
                 JOIN LIVE ROOM
               </button>
             </section>
-
           </div>
-
         ) : (
-
           <section className="mp-lobby">
-
             <div className="mp-kicker">
               LIVE ROOM · {room.status.toUpperCase()}
             </div>
@@ -655,7 +753,6 @@ export default function MultiplayerPage() {
             <div className="mp-players">
               {room.players.map(player => (
                 <div className="mp-player" key={player.id}>
-
                   <div className="mp-avatar">
                     {player.name.charAt(0).toUpperCase()}
                   </div>
@@ -668,34 +765,43 @@ export default function MultiplayerPage() {
                     <small>SCORE: {player.score}</small>
                   </div>
 
-                  {player.isHost && (
-                    <Crown className="mp-crown" />
-                  )}
-
+                  {player.isHost && <Crown className="mp-crown" />}
                 </div>
               ))}
             </div>
 
             {room.status === "playing" && (
               <div className="mp-game-section mp-location-consent">
-                <h3><Navigation size={18} /> LIVE TEAM LOCATION</h3>
+                <h3>
+                  <Navigation size={18} />
+                  LIVE TEAM LOCATION
+                </h3>
+
                 <p>
-                  Your location is shared only during this active mission and only after you enable it.
-                  Investigators can see Investigator teammates, never the Shadow. The Shadow sees only their own position.
+                  Your location is shared only during this active mission
+                  and only after you enable it. Investigators can see
+                  Investigator teammates, never the Shadow. The Shadow
+                  sees only their own position.
                 </p>
+
                 <div className="mp-location-control">
-                  <span className={shareLocation ? "mp-gps-online" : "mp-gps-offline"}>
+                  <span
+                    className={
+                      shareLocation
+                        ? "mp-gps-online"
+                        : "mp-gps-offline"
+                    }
+                  >
                     {gpsStatus}
                   </span>
+
                   <button
-                    className={shareLocation ? "mp-secondary" : "mp-primary"}
-                    onClick={() => {
-                      setError("");
-                      setShareLocation(value => !value);
-                      if (shareLocation) {
-                        setGpsStatus("GPS NOT SHARED");
-                      }
-                    }}
+                    className={
+                      shareLocation
+                        ? "mp-secondary"
+                        : "mp-primary"
+                    }
+                    onClick={toggleLocationSharing}
                   >
                     {shareLocation
                       ? "STOP SHARING LOCATION"
@@ -717,9 +823,7 @@ export default function MultiplayerPage() {
             )}
 
             {room.status === "waiting" && isHost && (
-
               <div className="mp-game-section">
-
                 <h3>
                   <MapPin size={18} />
                   GPS CHECKPOINT SETUP
@@ -731,7 +835,6 @@ export default function MultiplayerPage() {
                 </p>
 
                 <label>CHECKPOINT NAME</label>
-
                 <input
                   value={checkpointName}
                   onChange={e => setCheckpointName(e.target.value)}
@@ -739,7 +842,6 @@ export default function MultiplayerPage() {
                 />
 
                 <label>SECRET CLUE FOR INVESTIGATORS</label>
-
                 <textarea
                   value={checkpointClue}
                   onChange={e => setCheckpointClue(e.target.value)}
@@ -780,9 +882,7 @@ export default function MultiplayerPage() {
                 >
                   START 20-MINUTE MISSION
                 </button>
-
               </div>
-
             )}
 
             {room.status === "waiting" && !isHost && (
@@ -792,9 +892,7 @@ export default function MultiplayerPage() {
             )}
 
             {room.status === "playing" && (
-
               <div className="mp-game-section">
-
                 <h3>
                   <Timer size={18} />
                   MISSION IN PROGRESS
@@ -810,7 +908,6 @@ export default function MultiplayerPage() {
 
                 <div className="mp-role">
                   <ShieldAlert size={23} />
-
                   <div>
                     <b>YOUR SECRET ROLE: {role || "WAITING..."}</b>
                     <small>{objective}</small>
@@ -824,7 +921,6 @@ export default function MultiplayerPage() {
 
                 {room.checkpoints.map(point => (
                   <div className="mp-checkpoint" key={point.id}>
-
                     <div>
                       <b>{point.label}</b>
                       <small>
@@ -842,7 +938,6 @@ export default function MultiplayerPage() {
                     ) : (
                       <span>COMPLETED</span>
                     )}
-
                   </div>
                 ))}
 
@@ -909,15 +1004,12 @@ export default function MultiplayerPage() {
                       </div>
                     ))}
                 </div>
-
               </div>
-
             )}
 
             {room.status === "completed" && (
               <div className="mp-role">
                 <Trophy size={25} />
-
                 <div>
                   <b>MISSION COMPLETED</b>
                   <small>
@@ -929,20 +1021,15 @@ export default function MultiplayerPage() {
                 </div>
               </div>
             )}
-
           </section>
-
         )}
 
-        {error && (
-          <div className="mp-error">{error}</div>
-        )}
+        {error && <div className="mp-error">{error}</div>}
 
         <p className="mp-footnote">
           SHADOW FILES OUTDOOR MULTIPLAYER ·
           PLAY SAFELY IN PERMITTED AREAS.
         </p>
-
       </section>
     </main>
   );

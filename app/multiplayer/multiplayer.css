@@ -869,3 +869,178 @@
     padding: 10px;
   }
 }
+/* SHADOW FILES - MOBILE RESPONSIVE FIX */
+
+.mp-page {
+  width: 100%;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+.mp-wrap {
+  width: min(1100px, 100%);
+  margin: 0 auto;
+  padding-left: 20px;
+  padding-right: 20px;
+}
+
+.mp-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px;
+  width: 100%;
+}
+
+.mp-panel,
+.mp-lobby,
+.mp-game-section {
+  min-width: 0;
+  width: 100%;
+}
+
+.mp-panel input,
+.mp-panel select,
+.mp-panel textarea,
+.mp-game-section input,
+.mp-game-section textarea,
+.mp-game-section select {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.mp-panel button,
+.mp-game-section button,
+.mp-location-control button {
+  max-width: 100%;
+}
+
+.mp-room-code,
+.mp-checkpoint,
+.mp-location-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.mp-room-code strong {
+  overflow-wrap: anywhere;
+}
+
+.mp-player,
+.mp-role {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mp-map,
+.mp-map-loading {
+  width: 100%;
+  max-width: 100%;
+}
+
+@media (max-width: 700px) {
+  .mp-wrap {
+    padding: 24px 15px 40px;
+  }
+
+  .mp-nav {
+    padding: 14px 15px;
+    gap: 10px;
+  }
+
+  .mp-back {
+    font-size: 11px;
+  }
+
+  .mp-wrap h1 {
+    font-size: clamp(34px, 10vw, 54px);
+    line-height: 0.98;
+    overflow-wrap: anywhere;
+  }
+
+  .mp-columns {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .mp-panel {
+    padding: 20px 16px;
+  }
+
+  .mp-panel h2 {
+    font-size: 25px;
+  }
+
+  .mp-panel input,
+  .mp-panel select,
+  .mp-game-section input,
+  .mp-game-section textarea,
+  .mp-game-section select {
+    min-height: 46px;
+    font-size: 16px;
+  }
+
+  .mp-primary,
+  .mp-secondary {
+    width: 100%;
+    min-height: 46px;
+    justify-content: center;
+  }
+
+  .mp-room-code {
+    justify-content: space-between;
+  }
+
+  .mp-room-code strong {
+    font-size: 25px;
+  }
+
+  .mp-location-control {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .mp-location-control button {
+    width: 100%;
+  }
+
+  .mp-checkpoint {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .mp-checkpoint button {
+    width: 100%;
+  }
+
+  .mp-timer {
+    font-size: 42px;
+  }
+
+  .mp-scoreboard > div {
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .mp-footnote {
+    font-size: 10px;
+    line-height: 1.6;
+  }
+}
+
+@media (max-width: 380px) {
+  .mp-wrap {
+    padding-left: 11px;
+    padding-right: 11px;
+  }
+
+  .mp-panel {
+    padding: 17px 13px;
+  }
+
+  .mp-room-code strong {
+    font-size: 21px;
+  }
+}
