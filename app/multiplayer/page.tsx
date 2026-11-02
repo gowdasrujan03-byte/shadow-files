@@ -5,7 +5,6 @@ import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { io, Socket } from "socket.io-client";
 import Link from "next/link";
-
 import {
   ArrowLeft,
   Copy,
@@ -21,24 +20,19 @@ import {
   Target,
   Navigation
 } from "lucide-react";
-
 import "./multiplayer.css";
 
-const MissionMap = dynamic(
-  () => import("./mission-map"),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="mp-map-loading">
-        LOADING FIELD MAP...
-      </div>
-    )
-  }
-);
+const MissionMap = dynamic(() => import("./mission-map"), {
+  ssr: false,
+  loading: () => (
+    <div className="mp-map-loading">LOADING FIELD MAP...</div>
+  )
+});
 
+// LIVE RENDER BACKEND URL
 const SERVER_URL =
   process.env.NEXT_PUBLIC_GAME_SERVER_URL ||
-  "http://localhost:4000";
+  "https://shadow-files-backend-blfd.onrender.com";
 
 const modes = [
   "Hunt the Shadow",
@@ -110,21 +104,12 @@ export default function MultiplayerPage() {
   const [accuseId, setAccuseId] = useState("");
 
   const [shareLocation, setShareLocation] = useState(false);
-  const [myPosition, setMyPosition] =
-    useState<Position | null>(null);
-
-  const [livePlayers, setLivePlayers] =
-    useState<LivePlayerLocation[]>([]);
-
-  const [gpsStatus, setGpsStatus] =
-    useState("GPS NOT SHARED");
+  const [myPosition, setMyPosition] = useState<Position | null>(null);
+  const [livePlayers, setLivePlayers] = useState<LivePlayerLocation[]>([]);
+  const [gpsStatus, setGpsStatus] = useState("GPS NOT SHARED");
 
   const lastLocationSentAt = useRef(0);
-  const isHost = Boolean(
-  room && socket && room.hostId === socket.id
-);
 
-  // SOCKET CONNECTION
   useEffect(() => {
     const connection = io(SERVER_URL);
 
@@ -141,7 +126,7 @@ export default function MultiplayerPage() {
 
     connection.on("connect_error", () => {
       setConnected(false);
-      setError("Cannot connect to the game server.");
+      setError("Cannot connect to the game server. Please try again.");
     });
 
     connection.on("room:update", (data: Room) => {
@@ -150,10 +135,7 @@ export default function MultiplayerPage() {
 
     connection.on(
       "mission:role",
-      (data: {
-        role: string;
-        objective: string;
-      }) => {
+      (data: { role: string; objective: string }) => {
         setRole(data.role);
         setObjective(data.objective);
       }
@@ -161,10 +143,7 @@ export default function MultiplayerPage() {
 
     connection.on(
       "checkpoint:clue",
-      (data: {
-        checkpointId: string;
-        clue: string;
-      }) => {
+      (data: { checkpointId: string; clue: string }) => {
         setClues(old => [
           ...old,
           `${data.checkpointId}: ${data.clue}`
@@ -172,21 +151,16 @@ export default function MultiplayerPage() {
       }
     );
 
-    // RECEIVE SERVER-FILTERED PLAYER LOCATIONS
     connection.on("players:locations", (data: any) => {
+      // The server sends a role-filtered list to this socket only.
       const incoming = Array.isArray(data?.players)
         ? data.players
         : [];
 
-      const safeLocations: LivePlayerLocation[] =
-        incoming.flatMap((item: any) => {
-          const lat = Number(
-            item?.lat ?? item?.location?.lat
-          );
-
-          const lng = Number(
-            item?.lng ?? item?.location?.lng
-          );
+      const safeLocations: LivePlayerLocation[] = incoming.flatMap(
+        (item: any) => {
+          const lat = Number(item?.lat ?? item?.location?.lat);
+          const lng = Number(item?.lng ?? item?.location?.lng);
 
           if (
             !item?.id ||
@@ -202,7 +176,8 @@ export default function MultiplayerPage() {
             lat,
             lng
           }];
-        });
+        }
+      );
 
       setLivePlayers(safeLocations);
     });
@@ -211,8 +186,6 @@ export default function MultiplayerPage() {
       setFinished(data);
       setShareLocation(false);
       setGpsStatus("MISSION ENDED");
-      setMyPosition(null);
-      setLivePlayers([]);
     });
 
     return () => {
@@ -220,7 +193,7 @@ export default function MultiplayerPage() {
     };
   }, []);
 
-  // LIVE GPS SHARING
+  // Location sharing starts only after explicit player consent.
   useEffect(() => {
     if (
       !socket ||
@@ -238,9 +211,7 @@ export default function MultiplayerPage() {
 
     if (!navigator.geolocation) {
       setGpsStatus("GPS NOT SUPPORTED");
-      setError(
-        "This browser does not support location sharing."
-      );
+      setError("This browser does not support location sharing.");
       setShareLocation(false);
       return;
     }
@@ -248,7 +219,7 @@ export default function MultiplayerPage() {
     setGpsStatus("REQUESTING GPS...");
 
     const watchId = navigator.geolocation.watchPosition(
-      location => {
+      (location) => {
         const nextPosition = {
           lat: location.coords.latitude,
           lng: location.coords.longitude
@@ -269,17 +240,13 @@ export default function MultiplayerPage() {
           });
         }
       },
-
       () => {
         setGpsStatus("LOCATION PERMISSION NEEDED");
-
         setError(
           "Allow location access in your browser to share your position with your team."
         );
-
         setShareLocation(false);
       },
-
       {
         enableHighAccuracy: true,
         maximumAge: 3000,
@@ -290,17 +257,18 @@ export default function MultiplayerPage() {
     return () => {
       navigator.geolocation.clearWatch(watchId);
     };
-  }, [
-    socket,
-    room?.code,
-    room?.status,
-    shareLocation
-  ]);
+  }, [socket, room?.code, room?.status, shareLocation]);
 
-  // CREATE ROOM
+  const isHost = !!room && room.hostId === socket?.id;
+
   function createRoom() {
     if (!socket || !name.trim()) {
       setError("Enter your player name.");
+      return;
+    }
+
+    if (!connected) {
+      setError("Game server is not connected. Please wait.");
       return;
     }
 
@@ -320,7 +288,6 @@ export default function MultiplayerPage() {
 
         setRoom(response.room);
         setCode(response.room.code);
-
         setRole("");
         setShareLocation(false);
         setMyPosition(null);
@@ -332,10 +299,14 @@ export default function MultiplayerPage() {
     );
   }
 
-  // JOIN ROOM
   function joinRoom() {
     if (!socket || !name.trim() || !code.trim()) {
       setError("Enter your name and room code.");
+      return;
+    }
+
+    if (!connected) {
+      setError("Game server is not connected. Please wait.");
       return;
     }
 
@@ -364,7 +335,6 @@ export default function MultiplayerPage() {
     );
   }
 
-  // COPY ROOM CODE
   async function copyCode() {
     if (!room) return;
 
@@ -372,13 +342,10 @@ export default function MultiplayerPage() {
       await navigator.clipboard.writeText(room.code);
       setError("Room code copied successfully!");
     } catch {
-      setError(
-        "Copy this room code manually: " + room.code
-      );
+      setError("Copy this room code manually: " + room.code);
     }
   }
 
-  // GET GPS POSITION
   function getPosition(): Promise<Position> {
     return new Promise((resolve, reject) => {
       if (!navigator.geolocation) {
@@ -395,7 +362,6 @@ export default function MultiplayerPage() {
             lng: position.coords.longitude
           });
         },
-
         () => {
           reject(
             new Error(
@@ -403,7 +369,6 @@ export default function MultiplayerPage() {
             )
           );
         },
-
         {
           enableHighAccuracy: true,
           timeout: 15000,
@@ -413,7 +378,6 @@ export default function MultiplayerPage() {
     });
   }
 
-  // ADD CHECKPOINT
   async function addCheckpoint() {
     if (!room || !socket || !checkpointName.trim()) {
       setError("Enter a checkpoint name.");
@@ -441,10 +405,7 @@ export default function MultiplayerPage() {
           "A new clue has been discovered."
       };
 
-      const updatedPoints = [
-        ...draftPoints,
-        newPoint
-      ];
+      const updatedPoints = [...draftPoints, newPoint];
 
       socket.emit(
         "mission:set-checkpoints",
@@ -466,28 +427,22 @@ export default function MultiplayerPage() {
           setError("");
         }
       );
-
     } catch (err: any) {
       setBusy(false);
       setError(err.message);
     }
   }
 
-  // START MISSION
   function startMission() {
     if (!socket || !room) return;
 
     if (room.players.length < 2) {
-      setError(
-        "Invite at least one friend before starting."
-      );
+      setError("Invite at least one friend before starting.");
       return;
     }
 
     if (room.checkpoints.length === 0) {
-      setError(
-        "Add at least one GPS checkpoint first."
-      );
+      setError("Add at least one GPS checkpoint first.");
       return;
     }
 
@@ -506,7 +461,6 @@ export default function MultiplayerPage() {
     );
   }
 
-  // CHECK IN AT CHECKPOINT
   async function checkIn(checkpointId: string) {
     if (!socket || !room) return;
 
@@ -537,14 +491,12 @@ export default function MultiplayerPage() {
           );
         }
       );
-
     } catch (err: any) {
       setBusy(false);
       setError(err.message);
     }
   }
 
-  // ACCUSE PLAYER
   function accusePlayer() {
     if (!socket || !room || !accuseId) {
       setError("Select a player to accuse.");
@@ -572,35 +524,6 @@ export default function MultiplayerPage() {
     );
   }
 
-  // STOP LOCATION SHARING AND ASK SERVER TO DELETE STORED GPS
-  function toggleLocationSharing() {
-    setError("");
-
-    if (shareLocation && socket && room) {
-      socket.emit(
-        "player:location:stop",
-        {
-          code: room.code
-        },
-        (response: any) => {
-          if (!response?.ok) {
-            setError(
-              response?.error ||
-              "Could not confirm location cleanup from the server."
-            );
-          }
-        }
-      );
-
-      setGpsStatus("GPS NOT SHARED");
-      setMyPosition(null);
-      setLivePlayers([]);
-      lastLocationSentAt.current = 0;
-    }
-
-    setShareLocation(value => !value);
-  }
-
   return (
     <main className="mp-page">
 
@@ -619,7 +542,7 @@ export default function MultiplayerPage() {
 
         <div className="mp-kicker">
           <span className="mp-dot" />
-          OUTDOOR GAMEPLAY ENGINE / 3.0
+          OUTDOOR GAMEPLAY ENGINE / 2.0
         </div>
 
         <h1>
@@ -629,13 +552,8 @@ export default function MultiplayerPage() {
         </h1>
 
         <div className="mp-status">
-          {connected
-            ? <Wifi size={15} />
-            : <WifiOff size={15} />}
-
-          GAME SERVER: {connected
-            ? "CONNECTED"
-            : "DISCONNECTED"}
+          {connected ? <Wifi size={15} /> : <WifiOff size={15} />}
+          GAME SERVER: {connected ? "CONNECTED" : "DISCONNECTED"}
         </div>
 
         {!room ? (
@@ -649,7 +567,6 @@ export default function MultiplayerPage() {
               <p>Host a mission and invite your crew.</p>
 
               <label>PLAYER NAME</label>
-
               <input
                 value={name}
                 onChange={e => setName(e.target.value)}
@@ -658,7 +575,6 @@ export default function MultiplayerPage() {
               />
 
               <label>SELECT MISSION</label>
-
               <select
                 value={mode}
                 onChange={e => setMode(e.target.value)}
@@ -684,7 +600,6 @@ export default function MultiplayerPage() {
               <p>Enter your friend's invitation code.</p>
 
               <label>PLAYER NAME</label>
-
               <input
                 value={name}
                 onChange={e => setName(e.target.value)}
@@ -693,12 +608,9 @@ export default function MultiplayerPage() {
               />
 
               <label>ROOM CODE</label>
-
               <input
                 value={code}
-                onChange={e =>
-                  setCode(e.target.value.toUpperCase())
-                }
+                onChange={e => setCode(e.target.value.toUpperCase())}
                 placeholder="ABCD-42"
                 maxLength={10}
               />
@@ -736,84 +648,59 @@ export default function MultiplayerPage() {
             </div>
 
             <h3 className="mp-section-title">
-              <span>
-                <Users size={17} /> PLAYERS
-              </span>
+              <span><Users size={17} /> PLAYERS</span>
               {room.players.length}/20
             </h3>
 
             <div className="mp-players">
               {room.players.map(player => (
-                <div
-                  className="mp-player"
-                  key={player.id}
-                >
+                <div className="mp-player" key={player.id}>
+
                   <div className="mp-avatar">
                     {player.name.charAt(0).toUpperCase()}
                   </div>
 
                   <div className="mp-player-info">
                     <b>{player.name}</b>
-
                     <small>
-                      {player.isHost
-                        ? "ROOM HOST"
-                        : "PLAYER"}
+                      {player.isHost ? "ROOM HOST" : "PLAYER"}
                     </small>
-
-                    <small>
-                      SCORE: {player.score}
-                    </small>
+                    <small>SCORE: {player.score}</small>
                   </div>
 
                   {player.isHost && (
                     <Crown className="mp-crown" />
                   )}
+
                 </div>
               ))}
             </div>
 
             {room.status === "playing" && (
               <div className="mp-game-section mp-location-consent">
-
-                <h3>
-                  <Navigation size={18} />
-                  LIVE TEAM LOCATION
-                </h3>
-
+                <h3><Navigation size={18} /> LIVE TEAM LOCATION</h3>
                 <p>
-                  Your location is shared only during this active
-                  mission and only after you enable it.
-                  Investigators can see Investigator teammates,
-                  never the Shadow. The Shadow sees only their
-                  own position.
+                  Your location is shared only during this active mission and only after you enable it.
+                  Investigators can see Investigator teammates, never the Shadow. The Shadow sees only their own position.
                 </p>
-
                 <div className="mp-location-control">
-
-                  <span
-                    className={
-                      shareLocation
-                        ? "mp-gps-online"
-                        : "mp-gps-offline"
-                    }
-                  >
+                  <span className={shareLocation ? "mp-gps-online" : "mp-gps-offline"}>
                     {gpsStatus}
                   </span>
-
                   <button
-                    className={
-                      shareLocation
-                        ? "mp-secondary"
-                        : "mp-primary"
-                    }
-                    onClick={toggleLocationSharing}
+                    className={shareLocation ? "mp-secondary" : "mp-primary"}
+                    onClick={() => {
+                      setError("");
+                      setShareLocation(value => !value);
+                      if (shareLocation) {
+                        setGpsStatus("GPS NOT SHARED");
+                      }
+                    }}
                   >
                     {shareLocation
                       ? "STOP SHARING LOCATION"
                       : "ENABLE LIVE LOCATION"}
                   </button>
-
                 </div>
               </div>
             )}
@@ -830,6 +717,7 @@ export default function MultiplayerPage() {
             )}
 
             {room.status === "waiting" && isHost && (
+
               <div className="mp-game-section">
 
                 <h3>
@@ -846,9 +734,7 @@ export default function MultiplayerPage() {
 
                 <input
                   value={checkpointName}
-                  onChange={e =>
-                    setCheckpointName(e.target.value)
-                  }
+                  onChange={e => setCheckpointName(e.target.value)}
                   placeholder="Example: Park entrance"
                 />
 
@@ -856,41 +742,30 @@ export default function MultiplayerPage() {
 
                 <textarea
                   value={checkpointClue}
-                  onChange={e =>
-                    setCheckpointClue(e.target.value)
-                  }
+                  onChange={e => setCheckpointClue(e.target.value)}
                   placeholder="Enter a secret clue..."
                   rows={3}
                 />
 
                 <button
                   className="mp-secondary"
-                  disabled={
-                    busy || draftPoints.length >= 5
-                  }
+                  disabled={busy || draftPoints.length >= 5}
                   onClick={addCheckpoint}
                 >
                   <MapPin size={16} />
-
                   {busy
                     ? "GETTING GPS..."
                     : "ADD CHECKPOINT AT MY LOCATION"}
                 </button>
 
-                <p>
-                  Checkpoints added: {draftPoints.length}/5
-                </p>
+                <p>Checkpoints added: {draftPoints.length}/5</p>
 
                 {draftPoints.map((point, index) => (
-                  <div
-                    className="mp-checkpoint"
-                    key={index}
-                  >
+                  <div className="mp-checkpoint" key={index}>
                     <div>
                       <Flag size={15} />
                       <b>{point.label}</b>
                     </div>
-
                     <span>GPS SAVED</span>
                   </div>
                 ))}
@@ -907,16 +782,17 @@ export default function MultiplayerPage() {
                 </button>
 
               </div>
+
             )}
 
             {room.status === "waiting" && !isHost && (
               <div className="mp-wait-note">
-                Waiting for the host to set checkpoints and start
-                the mission.
+                Waiting for the host to set checkpoints and start the mission.
               </div>
             )}
 
             {room.status === "playing" && (
+
               <div className="mp-game-section">
 
                 <h3>
@@ -925,12 +801,9 @@ export default function MultiplayerPage() {
                 </h3>
 
                 <div className="mp-timer">
-                  {Math.floor(
-                    (room.timeLeft || 0) / 60
-                  ).toString().padStart(2, "0")}
-
+                  {Math.floor((room.timeLeft || 0) / 60)
+                    .toString().padStart(2, "0")}
                   :
-
                   {((room.timeLeft || 0) % 60)
                     .toString().padStart(2, "0")}
                 </div>
@@ -939,10 +812,7 @@ export default function MultiplayerPage() {
                   <ShieldAlert size={23} />
 
                   <div>
-                    <b>
-                      YOUR SECRET ROLE: {role || "WAITING..."}
-                    </b>
-
+                    <b>YOUR SECRET ROLE: {role || "WAITING..."}</b>
                     <small>{objective}</small>
                   </div>
                 </div>
@@ -953,22 +823,16 @@ export default function MultiplayerPage() {
                 </h3>
 
                 {room.checkpoints.map(point => (
-                  <div
-                    className="mp-checkpoint"
-                    key={point.id}
-                  >
+                  <div className="mp-checkpoint" key={point.id}>
+
                     <div>
                       <b>{point.label}</b>
-
                       <small>
-                        {point.completedBy.length}
-                        {" "}player check-in(s)
+                        {point.completedBy.length} player check-in(s)
                       </small>
                     </div>
 
-                    {!point.completedBy.includes(
-                      socket?.id || ""
-                    ) ? (
+                    {!point.completedBy.includes(socket?.id || "") ? (
                       <button
                         onClick={() => checkIn(point.id)}
                         disabled={busy}
@@ -978,33 +842,29 @@ export default function MultiplayerPage() {
                     ) : (
                       <span>COMPLETED</span>
                     )}
+
                   </div>
                 ))}
 
                 {role === "Investigator" && (
                   <div className="mp-clues">
-
                     <h3>
                       <Flag size={17} />
                       YOUR DISCOVERED CLUES
                     </h3>
 
                     {clues.length === 0 ? (
-                      <p>
-                        No clues collected yet. Visit a checkpoint.
-                      </p>
+                      <p>No clues collected yet. Visit a checkpoint.</p>
                     ) : (
                       clues.map((clue, index) => (
                         <p key={index}>{clue}</p>
                       ))
                     )}
-
                   </div>
                 )}
 
                 {role === "Investigator" && (
                   <div className="mp-accuse">
-
                     <h3>
                       <Target size={18} />
                       IDENTIFY THE SHADOW
@@ -1012,23 +872,14 @@ export default function MultiplayerPage() {
 
                     <select
                       value={accuseId}
-                      onChange={e =>
-                        setAccuseId(e.target.value)
-                      }
+                      onChange={e => setAccuseId(e.target.value)}
                     >
-                      <option value="">
-                        Select a player
-                      </option>
+                      <option value="">Select a player</option>
 
                       {room.players
-                        .filter(
-                          player => player.id !== socket?.id
-                        )
+                        .filter(player => player.id !== socket?.id)
                         .map(player => (
-                          <option
-                            value={player.id}
-                            key={player.id}
-                          >
+                          <option value={player.id} key={player.id}>
                             {player.name}
                           </option>
                         ))}
@@ -1040,12 +891,10 @@ export default function MultiplayerPage() {
                     >
                       ACCUSE PLAYER
                     </button>
-
                   </div>
                 )}
 
                 <div className="mp-scoreboard">
-
                   <h3>
                     <Trophy size={18} />
                     LIVE SCOREBOARD
@@ -1059,41 +908,34 @@ export default function MultiplayerPage() {
                         <b>{player.score} PTS</b>
                       </div>
                     ))}
-
                 </div>
 
               </div>
+
             )}
 
             {room.status === "completed" && (
               <div className="mp-role">
-
                 <Trophy size={25} />
 
                 <div>
                   <b>MISSION COMPLETED</b>
-
                   <small>
-                    {finished?.reason ||
-                      "The mission has ended."}
+                    {finished?.reason || "The mission has ended."}
                   </small>
-
                   <small>
-                    WINNER: {finished?.winner ||
-                      "See final scores"}
+                    WINNER: {finished?.winner || "See final scores"}
                   </small>
                 </div>
-
               </div>
             )}
 
           </section>
+
         )}
 
         {error && (
-          <div className="mp-error">
-            {error}
-          </div>
+          <div className="mp-error">{error}</div>
         )}
 
         <p className="mp-footnote">
