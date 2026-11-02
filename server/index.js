@@ -147,15 +147,43 @@ async function persistCompletedMatch(room, winner, reason) {
   }
 }
 
-// Allow local development and the deployed Vercel website.
-const allowedOrigins = [
-  "http://localhost:3000",
-  "https://shadow-files-taupe.vercel.app",
-];
+// CORS CONFIGURATION — LOCALHOST, VERCEL AND PREVIEW DEPLOYMENTS
+function isAllowedOrigin(origin) {
+  if (!origin || origin === "null") return true;
+
+  try {
+    const url = new URL(origin);
+
+    // Allow local development on any port.
+    if (
+      url.protocol === "http:" &&
+      ["localhost", "127.0.0.1"].includes(url.hostname)
+    ) {
+      return true;
+    }
+
+    // Allow production and Vercel preview deployments.
+    if (
+      url.protocol === "https:" &&
+      (
+        url.hostname === "shadow-files-taupe.vercel.app" ||
+        url.hostname.endsWith(".vercel.app")
+      )
+    ) {
+      return true;
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
 
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
+    origin: (origin, callback) => {
+      callback(null, isAllowedOrigin(origin));
+    },
     methods: ["GET", "POST"],
     credentials: true,
   },
@@ -268,12 +296,10 @@ function sendPrivateLocations(room) {
     let visiblePlayers = [];
 
     if (viewer.role === "Shadow") {
-      // Shadow sees only their own location.
       if (viewer.location) {
         visiblePlayers = [viewer];
       }
     } else if (viewer.role === "Investigator") {
-      // Investigators see only Investigator locations.
       visiblePlayers = [...room.players.values()].filter(
         player =>
           player.role === "Investigator" &&
@@ -336,66 +362,134 @@ function finishMission(room, winner, reason) {
 // CORS for REST profile, match-history and leaderboard endpoints.
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (origin && allowedOrigins.includes(origin)) {
+
+  if (origin && isAllowedOrigin(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Vary", "Origin");
   }
-  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  if (req.method === "OPTIONS") return res.sendStatus(204);
+
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Max-Age", "86400");
+
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
+
   next();
 });
 
 // PLAYER PROFILE
 app.get("/api/players/:playerId", async (req, res) => {
-  if (!db) return res.status(503).json({ ok: false, error: "Player database is not connected." });
+  if (!db) {
+    return res.status(503).json({
+      ok: false,
+      error: "Player database is not connected."
+    });
+  }
+
   try {
     const profile = await db.collection("players").findOne(
       { playerId: req.params.playerId },
       { projection: { _id: 0 } }
     );
-    if (!profile) return res.status(404).json({ ok: false, error: "Player profile not found." });
+
+    if (!profile) {
+      return res.status(404).json({
+        ok: false,
+        error: "Player profile not found."
+      });
+    }
+
     res.json({ ok: true, profile });
   } catch (error) {
     console.error("Profile lookup failed:", error.message);
-    res.status(500).json({ ok: false, error: "Could not load player profile." });
+    res.status(500).json({
+      ok: false,
+      error: "Could not load player profile."
+    });
   }
 });
 
 // MATCH HISTORY FOR ONE PLAYER
 app.get("/api/players/:playerId/matches", async (req, res) => {
-  if (!db) return res.status(503).json({ ok: false, error: "Match database is not connected." });
+  if (!db) {
+    return res.status(503).json({
+      ok: false,
+      error: "Match database is not connected."
+    });
+  }
+
   try {
     const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
+
     const matches = await db.collection("matches")
       .find({ "players.playerId": req.params.playerId })
       .sort({ completedAt: -1 })
       .limit(limit)
-      .project({ _id: 0, matchId: 1, roomCode: 1, mode: 1, winner: 1, reason: 1, startedAt: 1, completedAt: 1, players: 1 })
+      .project({
+        _id: 0,
+        matchId: 1,
+        roomCode: 1,
+        mode: 1,
+        winner: 1,
+        reason: 1,
+        startedAt: 1,
+        completedAt: 1,
+        players: 1
+      })
       .toArray();
+
     res.json({ ok: true, matches });
   } catch (error) {
     console.error("Match history lookup failed:", error.message);
-    res.status(500).json({ ok: false, error: "Could not load match history." });
+    res.status(500).json({
+      ok: false,
+      error: "Could not load match history."
+    });
   }
 });
 
 // PUBLIC LEADERBOARD
 app.get("/api/leaderboard", async (req, res) => {
-  if (!db) return res.status(503).json({ ok: false, error: "Player database is not connected." });
+  if (!db) {
+    return res.status(503).json({
+      ok: false,
+      error: "Player database is not connected."
+    });
+  }
+
   try {
     const players = await db.collection("players")
-      .find({}, { projection: { _id: 0, playerId: 1, displayName: 1, gamesPlayed: 1, wins: 1, losses: 1, totalPoints: 1 } })
+      .find(
+        {},
+        {
+          projection: {
+            _id: 0,
+            playerId: 1,
+            displayName: 1,
+            gamesPlayed: 1,
+            wins: 1,
+            losses: 1,
+            totalPoints: 1
+          }
+        }
+      )
       .sort({ totalPoints: -1, wins: -1 })
       .limit(50)
       .toArray();
+
     res.json({ ok: true, players });
   } catch (error) {
     console.error("Leaderboard lookup failed:", error.message);
-    res.status(500).json({ ok: false, error: "Could not load leaderboard." });
+    res.status(500).json({
+      ok: false,
+      error: "Could not load leaderboard."
+    });
   }
 });
 
+// HEALTH CHECK
 app.get("/health", (req, res) => {
   res.json({
     status: "online",
