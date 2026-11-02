@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -17,7 +18,10 @@ import {
   Timer,
   Trophy,
   Target,
-  Navigation
+  Navigation,
+  UserRound,
+  History,
+  RefreshCw
 } from "lucide-react";
 import "./multiplayer.css";
 
@@ -83,6 +87,7 @@ export default function MultiplayerPage() {
   const [connected, setConnected] = useState(false);
 
   const [name, setName] = useState("");
+  const [playerId, setPlayerId] = useState("");
   const [code, setCode] = useState("");
   const [mode, setMode] = useState(modes[0]);
 
@@ -106,8 +111,27 @@ export default function MultiplayerPage() {
   const [livePlayers, setLivePlayers] = useState<LivePlayerLocation[]>([]);
   const [gpsStatus, setGpsStatus] = useState("GPS NOT SHARED");
 
+  // PLAYER PROFILE AND MATCH HISTORY
+  const [profile, setProfile] = useState<any>(null);
+  const [matches, setMatches] = useState<any[]>([]);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileError, setProfileError] = useState("");
+  const [profileTab, setProfileTab] = useState<"profile" | "history">("profile");
+
   const lastLocationSentAt = useRef(0);
   const autoLaunchHandled = useRef(false);
+
+  // LOAD OR CREATE A STABLE PLAYER ID FOR THIS BROWSER
+  useEffect(() => {
+    let savedId = localStorage.getItem("shadow-files-player-id");
+
+    if (!savedId) {
+      savedId = crypto.randomUUID();
+      localStorage.setItem("shadow-files-player-id", savedId);
+    }
+
+    setPlayerId(savedId);
+  }, []);
 
   // CONNECT TO LIVE SERVER
   useEffect(() => {
@@ -200,7 +224,7 @@ export default function MultiplayerPage() {
 
   // AUTO CREATE OR JOIN FROM HOMEPAGE
   useEffect(() => {
-    if (!connected || !socket || autoLaunchHandled.current) return;
+    if (!connected || !socket || !playerId || autoLaunchHandled.current) return;
 
     const params = new URLSearchParams(window.location.search);
 
@@ -238,10 +262,12 @@ export default function MultiplayerPage() {
     const payload = action === "create"
       ? {
           name: incomingName,
+          playerId,
           mode: modes.includes(incomingMode) ? incomingMode : modes[0]
         }
       : {
           name: incomingName,
+          playerId,
           code: incomingCode
         };
 
@@ -271,10 +297,70 @@ export default function MultiplayerPage() {
       setError("");
 
       window.history.replaceState({}, "", "/multiplayer");
+      loadPlayerData();
     });
-  }, [connected, socket]);
+  }, [connected, socket, playerId]);
 
   const isHost = !!room && room.hostId === socket?.id;
+
+  // LOAD PLAYER PROFILE AND MATCH HISTORY FROM MONGODB
+  async function loadPlayerData() {
+    if (!playerId) return;
+
+    setProfileLoading(true);
+    setProfileError("");
+
+    try {
+      const [profileResponse, historyResponse] = await Promise.all([
+        fetch(`${SERVER_URL}/api/players/${encodeURIComponent(playerId)}`),
+        fetch(`${SERVER_URL}/api/players/${encodeURIComponent(playerId)}/matches?limit=20`)
+      ]);
+
+      const profileData = await profileResponse.json().catch(() => ({}));
+      const historyData = await historyResponse.json().catch(() => ({}));
+
+      if (profileResponse.ok && profileData.ok) {
+        setProfile(profileData.profile);
+      } else if (profileResponse.status === 404) {
+        setProfile(null);
+      } else {
+        throw new Error(
+          profileData.error || "Could not load player profile."
+        );
+      }
+
+      if (historyResponse.ok && historyData.ok) {
+        setMatches(
+          Array.isArray(historyData.matches)
+            ? historyData.matches
+            : []
+        );
+      } else if (historyResponse.status === 503) {
+        throw new Error(
+          historyData.error || "Match database is unavailable."
+        );
+      } else {
+        setMatches([]);
+      }
+    } catch (err: any) {
+      setProfileError(
+        err.message || "Could not load player data."
+      );
+    } finally {
+      setProfileLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (playerId) loadPlayerData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playerId]);
+
+  const winRate = profile?.gamesPlayed
+    ? Math.round(
+        (profile.wins / profile.gamesPlayed) * 100
+      )
+    : 0;
 
   // LIVE GPS SHARING
   useEffect(() => {
@@ -348,12 +434,18 @@ export default function MultiplayerPage() {
       return;
     }
 
+    if (!playerId) {
+      setError("Player profile is still loading. Please try again.");
+      return;
+    }
+
     setError("");
 
     socket.emit(
       "room:create",
       {
         name: name.trim(),
+        playerId,
         mode
       },
       (response: any) => {
@@ -371,6 +463,8 @@ export default function MultiplayerPage() {
         setClues([]);
         setFinished(null);
         setDraftPoints([]);
+
+        loadPlayerData();
       }
     );
   }
@@ -382,12 +476,18 @@ export default function MultiplayerPage() {
       return;
     }
 
+    if (!playerId) {
+      setError("Player profile is still loading. Please try again.");
+      return;
+    }
+
     setError("");
 
     socket.emit(
       "room:join",
       {
         name: name.trim(),
+        playerId,
         code: code.trim().toUpperCase()
       },
       (response: any) => {
@@ -403,6 +503,8 @@ export default function MultiplayerPage() {
         setLivePlayers([]);
         setClues([]);
         setFinished(null);
+
+        loadPlayerData();
       }
     );
   }
@@ -660,6 +762,197 @@ export default function MultiplayerPage() {
           GAME SERVER: {connected ? "CONNECTED" : "DISCONNECTED"}
         </div>
 
+        {/* PLAYER PROFILE AND MATCH HISTORY */}
+        <section className="mp-game-section" style={{ marginTop: 24 }}>
+          <div style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 12,
+            flexWrap: "wrap"
+          }}>
+            <h2 style={{
+              margin: 0,
+              display: "flex",
+              alignItems: "center",
+              gap: 10
+            }}>
+              <UserRound size={21} /> PLAYER CENTER
+            </h2>
+
+            <button
+              className="mp-secondary"
+              onClick={loadPlayerData}
+              disabled={!playerId || profileLoading}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8
+              }}
+            >
+              <RefreshCw size={15} />
+              {profileLoading ? "LOADING..." : "REFRESH"}
+            </button>
+          </div>
+
+          <div style={{
+            display: "flex",
+            gap: 10,
+            margin: "18px 0",
+            flexWrap: "wrap"
+          }}>
+            <button
+              className={profileTab === "profile" ? "mp-primary" : "mp-secondary"}
+              onClick={() => setProfileTab("profile")}
+            >
+              <UserRound size={15} /> PROFILE
+            </button>
+
+            <button
+              className={profileTab === "history" ? "mp-primary" : "mp-secondary"}
+              onClick={() => setProfileTab("history")}
+            >
+              <History size={15} /> MATCH HISTORY
+            </button>
+          </div>
+
+          {profileError && (
+            <p className="mp-error">{profileError}</p>
+          )}
+
+          {profileTab === "profile" ? (
+            <div>
+              <div className="mp-role" style={{ marginBottom: 16 }}>
+                <div className="mp-avatar">
+                  {(profile?.displayName || name || "P")
+                    .charAt(0).toUpperCase()}
+                </div>
+
+                <div>
+                  <b>
+                    {profile?.displayName || name || "YOUR PLAYER PROFILE"}
+                  </b>
+                  <small>PLAYER ID: {playerId || "LOADING..."}</small>
+                  <small>
+                    {profile
+                      ? "PROFILE SAVED IN MONGODB"
+                      : "PLAY YOUR FIRST MATCH TO CREATE YOUR PROFILE"}
+                  </small>
+                </div>
+              </div>
+
+              <div
+                className="mp-scoreboard"
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(125px, 1fr))",
+                  gap: 10
+                }}
+              >
+                {[
+                  ["GAMES PLAYED", profile?.gamesPlayed ?? 0],
+                  ["WINS", profile?.wins ?? 0],
+                  ["LOSSES", profile?.losses ?? 0],
+                  ["TOTAL POINTS", profile?.totalPoints ?? 0],
+                  ["WIN RATE", `${winRate}%`]
+                ].map(([label, value]) => (
+                  <div
+                    key={String(label)}
+                    style={{
+                      padding: 12,
+                      border: "1px solid rgba(255,255,255,.12)",
+                      borderRadius: 10
+                    }}
+                  >
+                    <small style={{ display: "block", opacity: .7 }}>
+                      {label}
+                    </small>
+                    <b style={{
+                      display: "block",
+                      fontSize: 22,
+                      marginTop: 5
+                    }}>
+                      {value}
+                    </b>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="mp-scoreboard">
+              <h3>
+                <History size={17} /> RECENT MATCHES
+              </h3>
+
+              {profileLoading ? (
+                <p>Loading your match history...</p>
+              ) : matches.length === 0 ? (
+                <p>
+                  No completed matches yet. Finish a mission and your
+                  results will appear here.
+                </p>
+              ) : (
+                matches.map((match: any) => {
+                  const myResult = match.players?.find(
+                    (item: any) => item.playerId === playerId
+                  );
+
+                  return (
+                    <div
+                      key={match.matchId}
+                      style={{
+                        padding: "14px 0",
+                        borderBottom: "1px solid rgba(255,255,255,.12)"
+                      }}
+                    >
+                      <div style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: 12,
+                        flexWrap: "wrap"
+                      }}>
+                        <b>{match.mode || "SHADOW FILES MATCH"}</b>
+                        <b>
+                          {myResult?.result === "win" ? "🏆 WIN" : "LOSS"}
+                        </b>
+                      </div>
+
+                      <small style={{
+                        display: "block",
+                        opacity: .75,
+                        marginTop: 5
+                      }}>
+                        {match.completedAt
+                          ? new Date(match.completedAt).toLocaleString()
+                          : "Date unavailable"}
+                      </small>
+
+                      <small style={{
+                        display: "block",
+                        opacity: .75,
+                        marginTop: 4
+                      }}>
+                        Room: {match.roomCode || "—"} ·
+                        Role: {myResult?.role || "—"} ·
+                        Score: {myResult?.score ?? 0} PTS
+                      </small>
+
+                      <small style={{
+                        display: "block",
+                        opacity: .75,
+                        marginTop: 4
+                      }}>
+                        Winner: {match.winner || "—"} ·
+                        {match.reason || "Mission completed"}
+                      </small>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+        </section>
+
         {!room ? (
           <div className="mp-columns">
             <section className="mp-panel">
@@ -688,7 +981,7 @@ export default function MultiplayerPage() {
 
               <button
                 className="mp-primary"
-                disabled={!connected}
+                disabled={!connected || !playerId}
                 onClick={createRoom}
               >
                 CREATE LIVE ROOM
@@ -719,7 +1012,7 @@ export default function MultiplayerPage() {
 
               <button
                 className="mp-secondary"
-                disabled={!connected}
+                disabled={!connected || !playerId}
                 onClick={joinRoom}
               >
                 JOIN LIVE ROOM
@@ -1018,6 +1311,14 @@ export default function MultiplayerPage() {
                   <small>
                     WINNER: {finished?.winner || "See final scores"}
                   </small>
+                  <button
+                    className="mp-secondary"
+                    onClick={loadPlayerData}
+                    disabled={profileLoading}
+                    style={{ marginTop: 10 }}
+                  >
+                    REFRESH PROFILE AND MATCH HISTORY
+                  </button>
                 </div>
               </div>
             )}

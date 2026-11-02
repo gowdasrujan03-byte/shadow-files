@@ -194,16 +194,37 @@ export default function Home() {
         </a>
 
         <nav className={mobileMenu ? "nav-links open" : "nav-links"}>
-          <a href="#games" onClick={() => setMobileMenu(false)}>EXPLORE GAMES</a>
-          <a href="#how" onClick={() => setMobileMenu(false)}>HOW TO PLAY</a>
-          <a href="#safety" onClick={() => setMobileMenu(false)}>PLAY SAFE</a>
+          <a href="#games" onClick={() => setMobileMenu(false)}>
+            EXPLORE GAMES
+          </a>
+          <a href="#how" onClick={() => setMobileMenu(false)}>
+            HOW TO PLAY
+          </a>
+          <a href="#safety" onClick={() => setMobileMenu(false)}>
+            PLAY SAFE
+          </a>
+
+          {/* PLAYER PROFILE - DESKTOP AND MOBILE */}
+          <a
+            href="/multiplayer"
+            onClick={() => setMobileMenu(false)}
+          >
+            PLAYER PROFILE
+          </a>
         </nav>
 
         <div className="nav-actions">
-          <button className="btn btn-quiet nav-join" onClick={() => setModal("join")}>
+          <button
+            className="btn btn-quiet nav-join"
+            onClick={() => setModal("join")}
+          >
             JOIN A GAME
           </button>
-          <button className="btn btn-red nav-create" onClick={() => openCreate()}>
+
+          <button
+            className="btn btn-red nav-create"
+            onClick={() => openCreate()}
+          >
             <Plus size={15} /> CREATE ROOM
           </button>
         </div>
@@ -236,34 +257,37 @@ export default function Home() {
           </p>
 
           <div className="hero-buttons">
-  <button className="btn btn-red btn-large" onClick={() => openCreate()}>
-    <Zap size={17} fill="currentColor" />
-    START A GAME
-    <ArrowRight size={17} />
-  </button>
+            <button
+              className="btn btn-red btn-large"
+              onClick={() => openCreate()}
+            >
+              <Zap size={17} fill="currentColor" />
+              START A GAME
+              <ArrowRight size={17} />
+            </button>
 
-  <a className="btn btn-outline btn-large" href="#games">
-    EXPLORE MODES <ArrowDown size={16} />
-  </a>
-</div>
+            <a className="btn btn-outline btn-large" href="#games">
+              EXPLORE MODES <ArrowDown size={16} />
+            </a>
+          </div>
 
-<button
-  className="btn btn-outline btn-large"
-  onClick={() => {
-    setNotice("");
-    setModal("join");
-  }}
-  style={{
-    marginTop: "16px",
-    width: "100%",
-    maxWidth: "320px",
-    justifyContent: "center"
-  }}
->
-  <Users size={17} />
-  JOIN AN EXISTING ROOM
-  <ArrowRight size={17} />
-</button>
+          <button
+            className="btn btn-outline btn-large"
+            onClick={() => {
+              setNotice("");
+              setModal("join");
+            }}
+            style={{
+              marginTop: "16px",
+              width: "100%",
+              maxWidth: "320px",
+              justifyContent: "center"
+            }}
+          >
+            <Users size={17} />
+            JOIN AN EXISTING ROOM
+            <ArrowRight size={17} />
+          </button>
 
           <div className="hero-proof">
             <div className="avatar-stack">
@@ -312,7 +336,9 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="hero-index"><span>01</span><i></i><span>05</span></div>
+        <div className="hero-index">
+          <span>01</span><i></i><span>05</span>
+        </div>
       </section>
 
       <section className="ticker" aria-label="Game features">
@@ -367,10 +393,12 @@ export default function Home() {
                 </div>
 
                 <div className="mode-actions">
-                  <button onClick={() => {
-                    setActiveMode(mode);
-                    setModal("details");
-                  }}>
+                  <button
+                    onClick={() => {
+                      setActiveMode(mode);
+                      setModal("details");
+                    }}
+                  >
                     MISSION BRIEF <ArrowUpRight size={15} />
                   </button>
 
@@ -439,9 +467,21 @@ export default function Home() {
           </div>
 
           <div className="field-stats">
-            <div><Shield size={22} /><b>SAFE ZONES</b><span>Mark your play boundary</span></div>
-            <div><Users size={22} /><b>CREW FIRST</b><span>Respect every player</span></div>
-            <div><MapPin size={22} /><b>PERMITTED PLACES</b><span>Get permission to play</span></div>
+            <div>
+              <Shield size={22} />
+              <b>SAFE ZONES</b>
+              <span>Mark your play boundary</span>
+            </div>
+            <div>
+              <Users size={22} />
+              <b>CREW FIRST</b>
+              <span>Respect every player</span>
+            </div>
+            <div>
+              <MapPin size={22} />
+              <b>PERMITTED PLACES</b>
+              <span>Get permission to play</span>
+            </div>
           </div>
         </div>
 
@@ -474,10 +514,13 @@ export default function Home() {
           </span>
         </a>
         <span>© 2026 SHADOW FILES · CONCEPT PROTOTYPE</span>
-        <a href="#top" onClick={(e) => {
-          e.preventDefault();
-          window.scrollTo({ top: 0, behavior: "smooth" });
-        }}>
+        <a
+          href="#top"
+          onClick={(e) => {
+            e.preventDefault();
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }}
+        >
           BACK TO TOP ↑
         </a>
       </footer>
@@ -489,7 +532,12 @@ export default function Home() {
             if (e.target === e.currentTarget) setModal(null);
           }}
         >
-          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="modal-title"
+          >
             <button
               className="modal-close"
               onClick={() => setModal(null)}
@@ -536,7 +584,10 @@ export default function Home() {
 
                 {notice && <p className="form-notice">{notice}</p>}
 
-                <button className="btn btn-red btn-full" onClick={startLiveRoom}>
+                <button
+                  className="btn btn-red btn-full"
+                  onClick={startLiveRoom}
+                >
                   CREATE LIVE ROOM <ArrowRight size={17} />
                 </button>
 
@@ -576,7 +627,10 @@ export default function Home() {
 
                 {notice && <p className="form-notice">{notice}</p>}
 
-                <button className="btn btn-red btn-full" onClick={joinLiveRoom}>
+                <button
+                  className="btn btn-red btn-full"
+                  onClick={joinLiveRoom}
+                >
                   JOIN LIVE ROOM <ArrowRight size={17} />
                 </button>
 
