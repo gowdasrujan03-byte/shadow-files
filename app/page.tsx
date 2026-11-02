@@ -236,16 +236,34 @@ export default function Home() {
           </p>
 
           <div className="hero-buttons">
-            <button className="btn btn-red btn-large" onClick={() => openCreate()}>
-              <Zap size={17} fill="currentColor" />
-              START A GAME
-              <ArrowRight size={17} />
-            </button>
+  <button className="btn btn-red btn-large" onClick={() => openCreate()}>
+    <Zap size={17} fill="currentColor" />
+    START A GAME
+    <ArrowRight size={17} />
+  </button>
 
-            <a className="btn btn-outline btn-large" href="#games">
-              EXPLORE MODES <ArrowDown size={16} />
-            </a>
-          </div>
+  <a className="btn btn-outline btn-large" href="#games">
+    EXPLORE MODES <ArrowDown size={16} />
+  </a>
+</div>
+
+<button
+  className="btn btn-outline btn-large"
+  onClick={() => {
+    setNotice("");
+    setModal("join");
+  }}
+  style={{
+    marginTop: "16px",
+    width: "100%",
+    maxWidth: "320px",
+    justifyContent: "center"
+  }}
+>
+  <Users size={17} />
+  JOIN AN EXISTING ROOM
+  <ArrowRight size={17} />
+</button>
 
           <div className="hero-proof">
             <div className="avatar-stack">
