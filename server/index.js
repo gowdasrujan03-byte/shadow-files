@@ -1,12 +1,151 @@
 
+// Load the project-root .env file even though this file is inside /server.
+const path = require("path");
+const fs = require("fs");
+const envPath = path.resolve(__dirname, "../.env");
+
+if (fs.existsSync(envPath)) {
+  require("dotenv").config({ path: envPath });
+  console.log("Environment file loaded:", envPath);
+} else {
+  console.log("ERROR: .env file not found:", envPath);
+}
+
+console.log("MongoDB URI detected:", Boolean(process.env.MONGODB_URI));
+
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
+const { MongoClient } = require("mongodb");
+const { randomUUID } = require("crypto");
 
 const app = express();
 const server = http.createServer(app);
 
 const PORT = process.env.PORT || 4000;
+
+// MongoDB connection and persistence for player profiles and match history.
+const mongoClient = process.env.MONGODB_URI
+  ? new MongoClient(process.env.MONGODB_URI)
+  : null;
+
+let db = null;
+let mongoStatus = process.env.MONGODB_URI ? "disconnected" : "not_configured";
+
+async function connectMongo() {
+  if (!mongoClient) {
+    console.warn("MONGODB_URI is missing. MongoDB features are disabled.");
+    return;
+  }
+
+  try {
+    await mongoClient.connect();
+    db = mongoClient.db("shadow_files");
+
+    await db.collection("players").createIndex(
+      { playerId: 1 },
+      { unique: true }
+    );
+    await db.collection("matches").createIndex(
+      { matchId: 1 },
+      { unique: true }
+    );
+    await db.collection("matches").createIndex({ completedAt: -1 });
+    await db.collection("matches").createIndex({
+      "players.playerId": 1,
+      completedAt: -1
+    });
+
+    mongoStatus = "connected";
+    console.log("MongoDB connected: shadow_files");
+  } catch (error) {
+    mongoStatus = "error";
+    console.error("MongoDB connection failed:", error.message);
+  }
+}
+
+function normalizePlayerId(value) {
+  const id = String(value || "").trim();
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  return uuidPattern.test(id) ? id : randomUUID();
+}
+
+async function savePlayerProfile(playerId, name) {
+  if (!db || !playerId) return;
+  const now = new Date();
+
+  await db.collection("players").updateOne(
+    { playerId },
+    {
+      $set: { displayName: name, updatedAt: now },
+      $setOnInsert: {
+        playerId,
+        createdAt: now,
+        gamesPlayed: 0,
+        wins: 0,
+        losses: 0,
+        totalPoints: 0
+      }
+    },
+    { upsert: true }
+  );
+}
+
+async function persistCompletedMatch(room, winner, reason) {
+  if (!db) return;
+
+  const completedAt = new Date();
+  const players = [...room.players.values()].map(player => {
+    const won = player.role === "Shadow"
+      ? winner === "Shadow"
+      : winner === "Investigators";
+
+    return {
+      playerId: player.playerId,
+      name: player.name,
+      role: player.role,
+      score: player.score,
+      result: won ? "win" : "loss"
+    };
+  });
+
+  const match = {
+    matchId: randomUUID(),
+    roomCode: room.code,
+    mode: room.mode,
+    winner,
+    reason,
+    startedAt: room.startedAt || completedAt,
+    completedAt,
+    players
+  };
+
+  try {
+    await db.collection("matches").insertOne(match);
+
+    await Promise.all(players.map(player => {
+      const now = new Date();
+      return db.collection("players").updateOne(
+        { playerId: player.playerId },
+        {
+          $set: { displayName: player.name, updatedAt: now },
+          $setOnInsert: { playerId: player.playerId, createdAt: now },
+          $inc: {
+            gamesPlayed: 1,
+            wins: player.result === "win" ? 1 : 0,
+            losses: player.result === "loss" ? 1 : 0,
+            totalPoints: player.score
+          }
+        },
+        { upsert: true }
+      );
+    }));
+
+    console.log("Match saved to MongoDB:", match.matchId);
+  } catch (error) {
+    console.error("Could not save completed match:", error.message);
+  }
+}
 
 // Allow local development and the deployed Vercel website.
 const allowedOrigins = [
@@ -176,6 +315,8 @@ function finishMission(room, winner, reason) {
   if (room.status !== "playing") return;
 
   room.status = "completed";
+  room.completedAt = new Date();
+  void persistCompletedMatch(room, winner, reason);
 
   clearInterval(room.timer);
   clearAllLocations(room);
@@ -192,6 +333,69 @@ function finishMission(room, winner, reason) {
   updateRoom(room);
 }
 
+// CORS for REST profile, match-history and leaderboard endpoints.
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && allowedOrigins.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  next();
+});
+
+// PLAYER PROFILE
+app.get("/api/players/:playerId", async (req, res) => {
+  if (!db) return res.status(503).json({ ok: false, error: "Player database is not connected." });
+  try {
+    const profile = await db.collection("players").findOne(
+      { playerId: req.params.playerId },
+      { projection: { _id: 0 } }
+    );
+    if (!profile) return res.status(404).json({ ok: false, error: "Player profile not found." });
+    res.json({ ok: true, profile });
+  } catch (error) {
+    console.error("Profile lookup failed:", error.message);
+    res.status(500).json({ ok: false, error: "Could not load player profile." });
+  }
+});
+
+// MATCH HISTORY FOR ONE PLAYER
+app.get("/api/players/:playerId/matches", async (req, res) => {
+  if (!db) return res.status(503).json({ ok: false, error: "Match database is not connected." });
+  try {
+    const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
+    const matches = await db.collection("matches")
+      .find({ "players.playerId": req.params.playerId })
+      .sort({ completedAt: -1 })
+      .limit(limit)
+      .project({ _id: 0, matchId: 1, roomCode: 1, mode: 1, winner: 1, reason: 1, startedAt: 1, completedAt: 1, players: 1 })
+      .toArray();
+    res.json({ ok: true, matches });
+  } catch (error) {
+    console.error("Match history lookup failed:", error.message);
+    res.status(500).json({ ok: false, error: "Could not load match history." });
+  }
+});
+
+// PUBLIC LEADERBOARD
+app.get("/api/leaderboard", async (req, res) => {
+  if (!db) return res.status(503).json({ ok: false, error: "Player database is not connected." });
+  try {
+    const players = await db.collection("players")
+      .find({}, { projection: { _id: 0, playerId: 1, displayName: 1, gamesPlayed: 1, wins: 1, losses: 1, totalPoints: 1 } })
+      .sort({ totalPoints: -1, wins: -1 })
+      .limit(50)
+      .toArray();
+    res.json({ ok: true, players });
+  } catch (error) {
+    console.error("Leaderboard lookup failed:", error.message);
+    res.status(500).json({ ok: false, error: "Could not load leaderboard." });
+  }
+});
+
 app.get("/health", (req, res) => {
   res.json({
     status: "online",
@@ -200,7 +404,8 @@ app.get("/health", (req, res) => {
     activeRooms: rooms.size,
     locationTracking: true,
     visibilityMode: "Option B",
-    locationStopSupported: true
+    locationStopSupported: true,
+    database: mongoStatus
   });
 });
 
@@ -223,6 +428,7 @@ io.on("connection", socket => {
     }
 
     const code = makeCode();
+    const playerId = normalizePlayerId(data.playerId);
 
     const room = {
       code,
@@ -237,6 +443,7 @@ io.on("connection", socket => {
 
     room.players.set(socket.id, {
       id: socket.id,
+      playerId,
       name,
       role: null,
       score: 0,
@@ -246,6 +453,10 @@ io.on("connection", socket => {
     });
 
     rooms.set(code, room);
+
+    void savePlayerProfile(playerId, name).catch(error =>
+      console.error("Could not save player profile:", error.message)
+    );
 
     socket.join(code);
 
@@ -294,8 +505,11 @@ io.on("connection", socket => {
       });
     }
 
+    const playerId = normalizePlayerId(data.playerId);
+
     room.players.set(socket.id, {
       id: socket.id,
+      playerId,
       name,
       role: null,
       score: 0,
@@ -303,6 +517,10 @@ io.on("connection", socket => {
       location: null,
       lastLocationSentAt: 0
     });
+
+    void savePlayerProfile(playerId, name).catch(error =>
+      console.error("Could not save player profile:", error.message)
+    );
 
     socket.join(code);
 
@@ -461,6 +679,7 @@ io.on("connection", socket => {
     });
 
     room.status = "playing";
+    room.startedAt = new Date();
     room.endsAt = Date.now() + MATCH_DURATION;
 
     room.timer = setInterval(() => {
@@ -751,9 +970,15 @@ io.on("connection", socket => {
   });
 });
 
-server.listen(PORT, "0.0.0.0", () => {
-  console.log("--------------------------------");
-  console.log(" SHADOW FILES OUTDOOR ENGINE 3.0");
-  console.log("--------------------------------");
-  console.log(`Server running on port ${PORT}`);
-});
+async function startServer() {
+  await connectMongo();
+
+  server.listen(PORT, "0.0.0.0", () => {
+    console.log("--------------------------------");
+    console.log(" SHADOW FILES OUTDOOR ENGINE 3.0");
+    console.log("--------------------------------");
+    console.log(`Server running on port ${PORT}`);
+  });
+}
+
+startServer();
